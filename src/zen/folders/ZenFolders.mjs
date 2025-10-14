@@ -1245,12 +1245,16 @@
       );
     }
 
-    #calculateHeightShift(tabsContainer, selectedTabs) {
-      let heightShift = 0;
+    #calculateHeightShift(tabsContainer, selectedTabs = []) {
+      let heightShift = window.windowUtils.getBoundsWithoutFlushing(tabsContainer).height;
       if (selectedTabs.length) {
-        return heightShift;
-      } else {
-        heightShift += window.windowUtils.getBoundsWithoutFlushing(tabsContainer).height;
+        // When we have selected items, we should remove the top of the 
+        // first element from the height shift, in order to just animate
+        // up until the first selected item.
+        const firstTab = selectedTabs[0];
+        const firstTabRect = window.windowUtils.getBoundsWithoutFlushing(firstTab);
+        const containerRect = window.windowUtils.getBoundsWithoutFlushing(tabsContainer);
+        heightShift = firstTabRect.top - containerRect.top;
       }
       return heightShift;
     }
@@ -1263,9 +1267,11 @@
       const splitViewIds = new Set();
       const activeFoldersIds = new Set();
       const itemsToHide = [];
+      const itemsToHideAnimate = [];
 
       const tabsContainer = group.querySelector('.tab-group-container');
       const groupStart = group.querySelector('.zen-tab-group-start');
+      tabsContainer.style.overflow = 'clip';
 
       const groupItems = this.#collectGroupItems(group, {
         selectedTabs,
@@ -1274,12 +1280,16 @@
       });
       const collapsedHeight = this.#calculateHeightShift(tabsContainer, selectedTabs);
 
+      let hasFoundSelected = false;
       if (selectedTabs.length) {
         for (let i = 0; i < groupItems.length; i++) {
           const { item, splitViewId, activeFolderId } = groupItems[i];
 
           // Skip selected items
-          if (selectedTabs.includes(item)) continue;
+          if (selectedTabs.includes(item)) {
+            hasFoundSelected = true;
+            continue;
+          }
 
           // Skip items from selected split-view groups
           if (splitViewId && splitViewIds.has(splitViewId)) continue;
@@ -1295,6 +1305,9 @@
 
           if (!itemsToHide.includes(item)) {
             itemsToHide.push(item);
+            if (hasFoundSelected) {
+              itemsToHideAnimate.push(item);
+            }
           }
         }
 
@@ -1308,8 +1321,8 @@
 
       animations.push(
         ...this.#createAnimation(
-          itemsToHide,
-          { opacity: 0, height: 0 },
+          itemsToHideAnimate,
+          { opacity: [1, 0], height: ['auto', 0] },
           { duration: 0.12, ease: 'easeInOut' }
         ),
         ...this.updateFolderIcon(group),
@@ -1325,6 +1338,14 @@
       gBrowser.tabContainer._invalidateCachedVisibleTabs();
       this.#animationCount += 1;
       await Promise.all(animations);
+      if (itemsToHide.length) {
+        groupStart.style.removeProperty('margin-top');
+        for (const item of itemsToHide) {
+          item.style.opacity = 0;
+          item.style.height = 0;
+        }
+      }
+      tabsContainer.style.overflow = '';
       if (this.#animationCount) {
         this.#animationCount -= 1;
         return;
@@ -1345,7 +1366,7 @@
 
       const tabsContainer = group.querySelector('.tab-group-container');
       tabsContainer.removeAttribute('hidden');
-      tabsContainer.style.overflow = 'hidden';
+      tabsContainer.style.overflow = 'clip';
 
       const groupStart = group.querySelector('.zen-tab-group-start');
       const itemsToShow = this.#normalizeGroupItems(group.childGroupsAndTabs);
@@ -1430,14 +1451,16 @@
         ),
         ...this.#createAnimation(
           itemsToHide,
-          { opacity: 0, height: 0 },
+          { opacity: [1, 0], height: ['auto', 0] },
           { duration: 0.12, ease: 'easeInOut' }
         ),
         ...this.updateFolderIcon(group),
         ...this.#createAnimation(
           groupStart,
           {
-            marginTop: 0,
+            // Use the first value to get the actual margin top, since in some 
+            // cases, motion gets a value from some sort of cache and it is not correct.
+            marginTop: [groupStart.style.marginTop, 0],
           },
           { duration: 0.12, ease: 'easeInOut' },
           afterMarginTop
@@ -1471,12 +1494,12 @@
           // the correct container size in the DOM
           tabsContainer.offsetHeight;
           tabsContainer.setAttribute('hidden', true);
-          const collapsedHeight = this.#calculateHeightShift(tabsContainer, []);
+          const collapsedHeight = this.#calculateHeightShift(tabsContainer);
           groupStart.style.marginTop = `${-(collapsedHeight + 4)}px`;
         };
 
         const groupStart = folder.querySelector('.zen-tab-group-start');
-        const collapsedHeight = this.#calculateHeightShift(tabsContainer, []);
+        const collapsedHeight = this.#calculateHeightShift(tabsContainer);
 
         // Collect animations for this specific folder becoming inactive
         animations.push(
@@ -1524,12 +1547,12 @@
               // the correct container size in the DOM
               tabsContainer.offsetHeight;
               tabsContainer.setAttribute('hidden', true);
-              const collapsedHeight = this.#calculateHeightShift(tabsContainer, []);
+              const collapsedHeight = this.#calculateHeightShift(tabsContainer);
               groupStart.style.marginTop = `${-(collapsedHeight + 4)}px`;
             };
 
             const groupStart = folder.querySelector('.zen-tab-group-start');
-            const collapsedHeight = this.#calculateHeightShift(tabsContainer, []);
+            const collapsedHeight = this.#calculateHeightShift(tabsContainer);
 
             // Collect animations for this specific folder becoming inactive
             const folderAnimation = [
@@ -1715,7 +1738,7 @@
       if (!group?.isZenFolder) return;
       const groupStart = group.querySelector('.zen-tab-group-start');
       const tabsContainer = group.querySelector('.tab-group-container');
-      const heightContainer = expand ? 0 : this.#calculateHeightShift(tabsContainer, []);
+      const heightContainer = expand ? 0 : this.#calculateHeightShift(tabsContainer);
       tabsContainer.style.overflow = 'clip';
 
       this.#createAnimation(
